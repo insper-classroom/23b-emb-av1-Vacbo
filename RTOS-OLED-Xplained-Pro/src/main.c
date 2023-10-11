@@ -41,6 +41,8 @@
 
 void btn_init(void);
 void RTT_init(float freqPrescale, uint32_t IrqNPulses, uint32_t rttIRQSource);
+void init_buzzer(void);
+void tone(uint32_t frequency, uint32_t duration);
 
 /************************************************************************/
 /* rtos vars                                                            */
@@ -139,7 +141,7 @@ static void task_coins(void *pvParameters) {
 }
 
 static void task_play(void *pvParameters) {
-	
+	init_buzzer();
 	
 	uint32_t coins;
 	for (;;) {
@@ -189,7 +191,6 @@ void btn_init(void) {
 
 void init_buzzer(void) {
 	pmc_enable_periph_clk(BUZZER_PIO_ID);
-
 	pio_configure(BUZZER_PIO, PIO_OUTPUT_0, BUZZER_PIO_PIN_MASK, PIO_DEFAULT);
 }
 
@@ -246,9 +247,9 @@ void tone(uint32_t frequency, uint32_t duration) {
     int repetitions = frequency * duration / 1000;
 
     for (int i = 0; i < repetitions; i++) {
-        set_buzzer();
+        pio_set(BUZZER_PIO, BUZZER_PIO_PIN_MASK);;
         delay_us(pulse);
-        clear_buzzer();
+        pio_clear(BUZZER_PIO, BUZZER_PIO_PIN_MASK);;
         delay_us(pulse);
     }
 }
