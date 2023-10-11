@@ -72,7 +72,7 @@ SemaphoreHandle_t xBtnSemaphore;
 QueueHandle_t xQueueCoins;
 
 extern void vApplicationStackOverflowHook(xTaskHandle *pxTask, signed char *pcTaskName) {
-	printf("stack overflow %x %s\r\n", pxTask, (portCHAR *)pcTaskName);
+	//printf("stack overflow %x %s\r\n", pxTask, (portCHAR *)pcTaskName);
 	for (;;) {	}
 }
 
