@@ -14,13 +14,27 @@
 /* IOS                                                                  */
 /************************************************************************/
 
+/* But pio */
 #define BTN_PIO PIOA
 #define BTN_PIO_ID ID_PIOA
 #define BTN_PIO_PIN 11
 #define BTN_PIO_PIN_MASK (1 << BTN_PIO_PIN)
 
+/* Buzzer pio */
+#define BUZZER_PIO PIOD
+#define BUZZER_PIO_ID ID_PIOD
+#define BUZZER_PIO_PIN 30
+#define BUZZER_PIO_PIN_MASK (1 << BUZZER_PIO_PIN)
 
+/* RTT constants */
+#define RTT_PRESCALE 1000
 
+/* Tone */
+#define NOTE_B5  988
+#define NOTE_B5_DURATION 80
+
+#define NOTE_E6  1319
+#define NOTE_E6_DURATION 640
 /************************************************************************/
 /* prototypes and types                                                 */
 /************************************************************************/
@@ -39,11 +53,20 @@ void RTT_init(float freqPrescale, uint32_t IrqNPulses, uint32_t rttIRQSource);
 #define TASK_OLED_STACK_SIZE                (1024*6/sizeof(portSTACK_TYPE))
 #define TASK_OLED_STACK_PRIORITY            (tskIDLE_PRIORITY)
 
+#define TASK_COINS_STACK_SIZE                (1024*6/sizeof(portSTACK_TYPE))
+#define TASK_COINS_STACK_PRIORITY            (tskIDLE_PRIORITY)
+
+#define TASK_PLAY_STACK_SIZE                (1024*6/sizeof(portSTACK_TYPE))
+#define TASK_PLAY_STACK_PRIORITY            (tskIDLE_PRIORITY + 1)
+
 extern void vApplicationStackOverflowHook(xTaskHandle *pxTask,  signed char *pcTaskName);
 extern void vApplicationIdleHook(void);
 extern void vApplicationTickHook(void);
 extern void vApplicationMallocFailedHook(void);
 extern void xPortSysTickHandler(void);
+
+SemaphoreHandle_t xBtnSemaphore;
+QueueHandle_t xQueueCoins;
 
 extern void vApplicationStackOverflowHook(xTaskHandle *pxTask, signed char *pcTaskName) {
 	printf("stack overflow %x %s\r\n", pxTask, (portCHAR *)pcTaskName);
@@ -63,7 +86,8 @@ extern void vApplicationMallocFailedHook(void) {
 /************************************************************************/
 
 void but_callback(void) {
-
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xSemaphoreGiveFromISR(xBtnSemaphore, &xHigherPriorityTaskWoken);
 }
 
 
@@ -80,7 +104,52 @@ static void task_debug(void *pvParameters) {
 		vTaskDelay(150);
 		gfx_mono_draw_filled_circle(10,10,4,0,GFX_WHOLE);
 		vTaskDelay(150);
+	}
+}
 
+static void task_coins(void *pvParameters) {
+	RTT_init(RTT_PRESCALE, 0, 0);
+	
+	uint32_t seed;
+	for (;;) {
+		for (;;) {
+			if (xSemaphoreTake(xBtnSemaphore, 1000) == pdTRUE) {
+				// Generate a random seed
+				seed = rtt_read_timer_value(RTT);
+				srand(seed);
+				printf("Seed: %u\r\n", seed);
+
+				// Choose a random number of coins between 1 and 3 for the first coin
+				uint32_t coins = (rand() % 3) + 1;
+				printf("Coins: %u\r\n", coins);
+				xQueueSend(xQueueCoins, &coins, 1000);
+				break;
+			}
+		}
+
+		for (;;) {
+			if (xSemaphoreTake(xBtnSemaphore, 1000) == pdTRUE) {
+				// Choose a random number of coins between 1 and 3
+				uint32_t coins = (rand() % 3) + 1;
+				printf("Coins: %u\r\n", coins);
+				xQueueSend(xQueueCoins, &coins, 1000);
+			}	
+		}
+	}
+}
+
+static void task_play(void *pvParameters) {
+	
+	
+	uint32_t coins;
+	for (;;) {
+		if (xQueueReceive(xQueueCoins, &coins, 1000) == pdTRUE) {
+			for (uint32_t i = 0; i < coins; i++) {
+				tone(NOTE_B5, NOTE_B5_DURATION);
+				tone(NOTE_E6, NOTE_E6_DURATION);
+			}
+		}
+		vTaskDelay(50);
 	}
 }
 
@@ -118,6 +187,11 @@ void btn_init(void) {
 	NVIC_SetPriority(BTN_PIO_ID, 4); // Prioridade 4
 }
 
+void init_buzzer(void) {
+	pmc_enable_periph_clk(BUZZER_PIO_ID);
+
+	pio_configure(BUZZER_PIO, PIO_OUTPUT_0, BUZZER_PIO_PIN_MASK, PIO_DEFAULT);
+}
 
 void RTT_init(float freqPrescale, uint32_t IrqNPulses, uint32_t rttIRQSource) {
 
@@ -162,6 +236,22 @@ static void configure_console(void) {
 	setbuf(stdout, NULL);
 }
 
+void tone(uint32_t frequency, uint32_t duration) {
+    if (frequency == 0) {
+        delay_ms(duration);
+        return;
+    }
+
+    int pulse = 1000000 / (2 * frequency);
+    int repetitions = frequency * duration / 1000;
+
+    for (int i = 0; i < repetitions; i++) {
+        set_buzzer();
+        delay_us(pulse);
+        clear_buzzer();
+        delay_us(pulse);
+    }
+}
 /************************************************************************/
 /* main                                                                 */
 /************************************************************************/
@@ -169,13 +259,39 @@ int main(void) {
 	/* Initialize the SAM system */
 	sysclk_init();
 	board_init();
+	btn_init();
 
 	/* Initialize the console uart */
 	configure_console();
+
+	printf("Start\r\n");
 	
+	/* Create the tasks */
 	if (xTaskCreate(task_debug, "debug", TASK_OLED_STACK_SIZE, NULL,
 	TASK_OLED_STACK_PRIORITY, NULL) != pdPASS) {
 		printf("Failed to create debug task\r\n");
+	}
+
+	if (xTaskCreate(task_coins, "coins", TASK_COINS_STACK_SIZE, NULL,
+	TASK_COINS_STACK_PRIORITY, NULL) != pdPASS) {
+		printf("Failed to create coins task\r\n");
+	}
+
+	if (xTaskCreate(task_play, "play", TASK_PLAY_STACK_SIZE, NULL,
+	TASK_PLAY_STACK_PRIORITY, NULL) != pdPASS) {
+		printf("Failed to create play task\r\n");
+	}
+
+	/* Create Semaphores */
+	xBtnSemaphore = xSemaphoreCreateBinary();
+	if (xBtnSemaphore == NULL) {
+		printf("Failed to create btn semaphore\r\n");
+	}
+
+	/* Create Queues */
+	xQueueCoins = xQueueCreate(32, sizeof(uint32_t));
+	if (xQueueCoins == NULL) {
+		printf("Failed to create coins queue\r\n");
 	}
 
 	/* Start the scheduler. */
