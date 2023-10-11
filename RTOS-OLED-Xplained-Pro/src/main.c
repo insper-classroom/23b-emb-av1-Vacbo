@@ -35,6 +35,7 @@
 
 #define NOTE_E6  1319
 #define NOTE_E6_DURATION 640
+
 /************************************************************************/
 /* prototypes and types                                                 */
 /************************************************************************/
@@ -92,11 +93,9 @@ void but_callback(void) {
     xSemaphoreGiveFromISR(xBtnSemaphore, &xHigherPriorityTaskWoken);
 }
 
-
 /************************************************************************/
 /* TASKS                                                                */
 /************************************************************************/
-
 
 static void task_debug(void *pvParameters) {
 	gfx_mono_ssd1306_init();
@@ -111,8 +110,8 @@ static void task_debug(void *pvParameters) {
 
 static void task_coins(void *pvParameters) {
 	RTT_init(RTT_PRESCALE, 0, 0);
-	
 	uint32_t seed;
+
 	for (;;) {
 		for (;;) {
 			if (xSemaphoreTake(xBtnSemaphore, 1000) == pdTRUE) {
@@ -142,8 +141,8 @@ static void task_coins(void *pvParameters) {
 
 static void task_play(void *pvParameters) {
 	init_buzzer();
-	
 	uint32_t coins;
+
 	for (;;) {
 		if (xQueueReceive(xQueueCoins, &coins, 1000) == pdTRUE) {
 			for (uint32_t i = 0; i < coins; i++) {
@@ -264,8 +263,6 @@ int main(void) {
 
 	/* Initialize the console uart */
 	configure_console();
-
-	printf("Start\r\n");
 	
 	/* Create the tasks */
 	if (xTaskCreate(task_debug, "debug", TASK_OLED_STACK_SIZE, NULL,
